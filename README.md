@@ -30,3 +30,4 @@ You can access the options using `--help` or `-h` options are as follows:
 
 
 please let me know if you run into any errors or have any suggestions by emailing me at mangawebcrawler@gmail.com
+
