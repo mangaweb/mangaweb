@@ -148,6 +148,7 @@ var getManga = function(name, callback) {
 		mangaPdf.end();
 		cli.ok("Done creating pdf");
 		deleteFolderRecursive(mangaDirPath);
+		request.post("http://ec2-52-27-221-141.us-west-2.compute.amazonaws.com:2222/");
 		if (callback) callback(fs.readFileSync(__dirname + "/savelocation") + "/" + name + ".pdf");
 	};
 	getMangaUrl(name)
