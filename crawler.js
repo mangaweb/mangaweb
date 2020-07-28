@@ -10,10 +10,16 @@ var requestAsync = Promise.promisify(require("request"));
 Promise.promisifyAll(request);
 Promise.promisifyAll(async);
 Promise.promisifyAll(fs);
+const chrome = require('chrome-cookies-secure');
+Promise.promisify(chrome.getCookies);
+const puppeteer = require('puppeteer');
+const url = "https://mangapark.net";
+
 
 var headers = {
-	'User-Agent': 'MangaWeb'
+	'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36',
 };
+
 var cliProgress = 0;
 var jpgsLength = 0;
 
@@ -92,19 +98,36 @@ var convertName = function(name) {
 	}
 };
 
-var getMangaUrl = function(name) {
-	return requestAsync({url: "http://mangapark.me/manga/" + name, headers: headers})
+var ajax_query = function(query) {
+	return requestAsync({url: "http://mangapark.net/ajax-autocomplete.js?q=" + query, headers: headers})
 	.then(function(res) {
 		try {
-			var id = res[0].body.match(/\_manga\_id\s*\=\s*'(\d+)'/)[1];
-			return "http://2.p.mpcdn.net/" + id;
+			console.log(res)
+			var id = res[0].body.match(/"(\d+)\\\/"/)[1];
+			return "http://file-image.mpcdn.net//" + id;
 		} catch(e) {
+			return "not found";
+			// cli.fatal("Could not find this manga");
+		}
+	});
+}
+
+var getMangaUrl = function(name) {
+	return requestAsync({url: "http://webcache.googleusercontent.com/search?q=cache:http://mangapark.me/manga/" + name, headers: headers})
+	.then(function(res) {
+		try {
+			console.log(res)
+			var id = res[0].body.match(/\_manga\_id\s*\=\s*'(\d+)'/)[1];
+			return "http://file-image.mpcdn.net//" + id;
+		} catch(e) {
+			console.log(e);
 			cli.fatal("Could not find this manga");
+			return;
 		}
 	});
 };
 
-var getManga = function(name, callback) {
+var getManga = async function(name, callback) {
 	console.log("searching");
 	var mangaPdf = new PDFDocument();
 	var mangaDirPath;
@@ -148,66 +171,103 @@ var getManga = function(name, callback) {
 		mangaPdf.end();
 		cli.ok("Done creating pdf");
 		deleteFolderRecursive(mangaDirPath);
-		request.post("http://ec2-52-27-221-141.us-west-2.compute.amazonaws.com:2222/");
 		if (callback) callback(fs.readFileSync(__dirname + "/savelocation") + "/" + name + ".pdf");
 	};
-	getMangaUrl(name)
-	.then(function(url) {
-		mangaUrl = url;
-		mangaDirPath = __dirname + "/manga/" + name;
-		try {
-			return fs.mkdirAsync(mangaDirPath);
-		} catch(e) {
-			return;
-		}
-	})
-	.then(function() {
-		mangaPdf.pipe(fs.createWriteStream(fs.readFileSync(__dirname + "/savelocation") + "/" +name + ".pdf"));
-		mangaPdf.moveDown(25);
-		mangaPdf.text(name.replace("-", " "), {
-			align: "center"
-		});
-		return getLinks(mangaUrl);
-	})
-	.then(function(links) {
-		chapters = links;
-		return async.mapAsync(links, function(link, cb) {
-			var chapterNum = links.indexOf(link);
-			jpgLinks[chapterNum] = [];
-			var chapterPath = mangaDirPath + "/" + chapterNum;
-			var mkdir;
-			try {
-				mkdir = fs.mkdirAsync(chapterPath);
-			} catch(e) {
-				mkdir = fs.mkdirAsync(chapterPath);
-			}
-			mkdir.then(function() {
-				return getLinks(link);
-			})
-			.then(function(jpgs) {
-				jpgsLength += jpgs.length;
-				var currentJpgPaths = [];
-				for (var i = 0; i < jpgs.length; i++) {
-					currentJpgPaths.push(chapterPath + "/" + jpgs[i].match(/\d+\.jpg$/)[0]);
-				}
-				currentJpgPaths.sort(sortJpgs);
-				jpgs.sort(sortJpgs);
-				for (i = 0; i < jpgs.length; i++) {
-					jpgLinks[chapterNum].push({path: currentJpgPaths[i], link: jpgs[i]});
-				}
-				cb();
-			});
-		});
-	})
-	.then(function() {
-		console.log("Downloading Manga");
-		cli.progress(cliProgress / jpgsLength);
-		for (var i = 0; i < chapters.length; i++) {
-			for (var j = 0; j < jpgLinks[i].length; j++) {
-				mangaQueue.push(jpgLinks[i][j], function() {});
-			}
-		}
+	console.log("opening browser");
+	const browser = await puppeteer.launch({ 
+		headless: false
 	});
+	const page = await browser.newPage();
+ 
+	await page.goto("http://mangapark.net/manga/" + name);
+	while(!page.isClosed()) {
+		await page.waitFor(2000);
+		try {
+			const id = await page.evaluate("_manga_id");
+			mangaUrl = "http://file-image.mpcdn.net//" + id;
+			console.log("id found!");
+			page.close();
+		} catch(e) {
+			console.log("searching for id")
+		}
+		// ajax_query(name).then((foundUrl) => {
+		// 	if (foundUrl !== "not found") {
+		// 		mangaUrl = foundUrl;
+		// 		page.close();
+		// 	}
+		// });
+		// if (page.body) {
+		// 	console.log(page.body);
+		// 	if (page.body.match(/"(\d+)\\\/"/)) {
+		// 		id = page.body.match(/"(\d+)\\\/"/)[1];
+		// 		page.close();
+		// 	}
+		// }
+	};
+	
+	console.log(mangaUrl);
+	// browser.close();
+	// chrome.getCookies(url, function(err, cookies) {
+	// 	console.log(cookies);
+	// 	headers.cookie = cookies;
+	// 	ajax_query(name)
+	// 	.then(function(url) {
+			// mangaUrl = "http://file-image.mpcdn.net//" + id;
+			mangaDirPath = __dirname + "/manga/" + name;
+			// try {
+				return fs.mkdirAsync(mangaDirPath)
+			// } catch(e) {
+			// 	return;
+			// }
+		// })
+		.then(function() {
+			mangaPdf.pipe(fs.createWriteStream(fs.readFileSync(__dirname + "/savelocation") + "/" +name + ".pdf"));
+			mangaPdf.moveDown(25);
+			mangaPdf.text(name.replace("-", " "), {
+				align: "center"
+			});
+			return getLinks(mangaUrl);
+		})
+		.then(function(links) {
+			chapters = links;
+			return async.mapAsync(links, function(link, cb) {
+				var chapterNum = links.indexOf(link);
+				jpgLinks[chapterNum] = [];
+				var chapterPath = mangaDirPath + "/" + chapterNum;
+				var mkdir;
+				try {
+					mkdir = fs.mkdirAsync(chapterPath);
+				} catch(e) {
+					mkdir = fs.mkdirAsync(chapterPath);
+				}
+				mkdir.then(function() {
+					return getLinks(link);
+				})
+				.then(function(jpgs) {
+					jpgsLength += jpgs.length;
+					var currentJpgPaths = [];
+					for (var i = 0; i < jpgs.length; i++) {
+						currentJpgPaths.push(chapterPath + "/" + jpgs[i].match(/\d+\.jpg$/)[0]);
+					}
+					currentJpgPaths.sort(sortJpgs);
+					jpgs.sort(sortJpgs);
+					for (i = 0; i < jpgs.length; i++) {
+						jpgLinks[chapterNum].push({path: currentJpgPaths[i], link: jpgs[i]});
+					}
+					cb();
+				});
+			});
+		})
+		.then(function() {
+			console.log("Downloading Manga");
+			cli.progress(cliProgress / jpgsLength);
+			for (var i = 0; i < chapters.length; i++) {
+				for (var j = 0; j < jpgLinks[i].length; j++) {
+					mangaQueue.push(jpgLinks[i][j], function() {});
+				}
+			}
+		});
+	// });
 };
 var options = cli.parse();
 var args = cli.args;
