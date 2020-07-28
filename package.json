@@ -6,7 +6,7 @@
     "async": "^1.4.0",
     "bluebird": "^2.9.34",
     "cli": "^0.9.0",
-    "debug": "~2.2.0",
+    "debug": "~2.6.9",
     "easyimage": "^2.0.3",
     "graceful-fs": "^4.1.2",
     "image-size": "^0.3.5",
