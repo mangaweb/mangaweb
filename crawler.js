@@ -10,10 +10,8 @@ var requestAsync = Promise.promisify(require("request"));
 Promise.promisifyAll(request);
 Promise.promisifyAll(async);
 Promise.promisifyAll(fs);
+const puppeteer = require('puppeteer');
 
-var headers = {
-	'User-Agent': 'MangaWeb'
-};
 var cliProgress = 0;
 var jpgsLength = 0;
 
@@ -60,7 +58,7 @@ var downloadImage = function(imgObj, cb) {
 		var link = imgObj.link;
 		var path = imgObj.path;
 		var imgName = link.match(/\d+\.jpg/)[0];
-		var req = request({url: link, headers: headers});
+		var req = request({url: link});
 		req.pipe(fs.createWriteStream(path));
 		req.on("end", function() {
 			cli.progress(++cliProgress / jpgsLength);
@@ -71,7 +69,7 @@ var downloadImage = function(imgObj, cb) {
 };
 
 var getLinks = function(dirUrl) {
-	return requestAsync({url: dirUrl, headers: headers})
+	return requestAsync({url: dirUrl})
 	.then(function(res) {
 		var links = res[0].body.match(/href="\/?\d+(\/|\.jpg)"/g);
 		links = links.map(function(href) {
@@ -92,19 +90,8 @@ var convertName = function(name) {
 	}
 };
 
-var getMangaUrl = function(name) {
-	return requestAsync({url: "http://mangapark.me/manga/" + name, headers: headers})
-	.then(function(res) {
-		try {
-			var id = res[0].body.match(/\_manga\_id\s*\=\s*'(\d+)'/)[1];
-			return "http://2.p.mpcdn.net/" + id;
-		} catch(e) {
-			cli.fatal("Could not find this manga");
-		}
-	});
-};
-
-var getManga = function(name, callback) {
+var getManga = async function(name, callback) {
+	name = convertName(name);
 	console.log("searching");
 	var mangaPdf = new PDFDocument();
 	var mangaDirPath;
@@ -147,20 +134,37 @@ var getManga = function(name, callback) {
 		}
 		mangaPdf.end();
 		cli.ok("Done creating pdf");
+		console.log("Cleaning up...")
 		deleteFolderRecursive(mangaDirPath);
-		request.post("http://ec2-52-27-221-141.us-west-2.compute.amazonaws.com:2222/");
-		if (callback) callback(fs.readFileSync(__dirname + "/savelocation") + "/" + name + ".pdf");
-	};
-	getMangaUrl(name)
-	.then(function(url) {
-		mangaUrl = url;
-		mangaDirPath = __dirname + "/manga/" + name;
-		try {
-			return fs.mkdirAsync(mangaDirPath);
-		} catch(e) {
-			return;
+		if (callback) {
+			callback(fs.readFileSync(__dirname + "/savelocation") + "/" + name + ".pdf");
+		} else {
+			cli.exit(0);
 		}
-	})
+	};
+	console.log("opening browser");
+	const browser = await puppeteer.launch({
+		headless: false
+	});
+	
+	const pages = await browser.pages();
+	const page = pages[0];
+ 
+	await page.goto("http://mangapark.net/manga/" + name);
+	while(!page.isClosed()) {
+		await page.waitFor(2000);
+		try {
+			const id = await page.evaluate("_manga_id");
+			mangaUrl = "http://file-image.mpcdn.net//" + id;
+			console.log("id found!");
+			page.close();
+			break;
+		} catch(e) {
+			console.log("searching for id")
+		}
+	};
+	mangaDirPath = __dirname + "/manga/" + name;
+	return fs.mkdirAsync(mangaDirPath)
 	.then(function() {
 		mangaPdf.pipe(fs.createWriteStream(fs.readFileSync(__dirname + "/savelocation") + "/" +name + ".pdf"));
 		mangaPdf.moveDown(25);
@@ -209,6 +213,7 @@ var getManga = function(name, callback) {
 		}
 	});
 };
+
 var options = cli.parse();
 var args = cli.args;
 
@@ -231,10 +236,12 @@ if (options.save) {
 	});
 	allMangaQueue.drain(function() {
 		console.log("All done");
+		cli.exit(0);
 	});
 
 } else {
 	getManga(args.join("-"), function(path) {
-		console.log(path);
+		console.log("PDF Location: " + path);
+		cli.exit(0);
 	});
 }
