@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "scripts": {},
   "dependencies": {
-    "async": "^1.4.0",
+    "async": "^2.6.4",
     "bluebird": "^2.9.34",
     "cli": "^1.0.1",
     "debug": "^4.2.0",
